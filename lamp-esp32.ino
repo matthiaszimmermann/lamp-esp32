@@ -1,8 +1,8 @@
 #include "arduino.h"
 #include <Preferences.h>
 
-//RemoteXY Setup
-#define REMOTEXY__DEBUGLOG    
+// RemoteXY Setup
+// #define REMOTEXY__DEBUGLOG    
 
 // RemoteXY select connection mode and include library 
 #define REMOTEXY_MODE__ESP32CORE_BLE
@@ -48,9 +48,16 @@ const int pwmPins[4] = {18, 39, 40, 21};     // R G B W
 // ============ PWM SETTINGS =============
 const int pwmFreq = 10000;                // 5 kHz PWM
 const int pwmResolution = 8;            // 8-bit (0–255)
-char rgbw_values[4];
+uint8_t rgbw_values[4];
+
+// ============ BRIGHTNESS MONITORING ============
+const float BRIGHTNESS_SAFE = 0.5f;  // long-term safe scale (50%); for logging only
+unsigned long lastSerialPrint = 0;
 
 void setup() {
+  Serial.begin(9600);
+  delay(500);  // wait for Serial port to be ready
+
   RemoteXY_Init ();  // initialization by macros
 
   // Set up each channel + pin
@@ -67,6 +74,8 @@ void setup() {
   prev_G = RemoteXY.rgb_G;
   prev_B = RemoteXY.rgb_B;
   preferences.end();
+
+  logState(prev_R, prev_G, prev_B);
 }
 
 void loop() { 
@@ -76,24 +85,25 @@ void loop() {
   // use the RemoteXY structure for data transfer
   // do not call delay(), use instead RemoteXYEngine.delay() 
   
-  // Convert RGB to RGBW - extract white component for efficiency
   uint8_t r = RemoteXY.rgb_R;
   uint8_t g = RemoteXY.rgb_G;
   uint8_t b = RemoteXY.rgb_B;
-  
-  // Find the minimum of R, G, B - this is the white component
+
+  // Pass RGB through unchanged; add white channel from min(R,G,B) for extra brightness.
+  // Above slider 50%, the W channel adds brightness without dimming the colored channels.
   uint8_t w = min(r, min(g, b));
-  
-  // Subtract white from RGB channels
-  rgbw_values[0] = (r - w) / 2;  // R
-  rgbw_values[1] = (g - w) / 2;  // G
-  rgbw_values[2] = (b - w) / 2;  // B
-  rgbw_values[3] = w / 2;        // W (white channel)
+  rgbw_values[0] = r;  // R
+  rgbw_values[1] = g;  // G
+  rgbw_values[2] = b;  // B
+  rgbw_values[3] = w;  // W
+
+  logState(r, g, b);
 
   // Check if RGB values changed from previous iteration (not just different from saved)
   if (RemoteXY.rgb_R != prev_R || 
       RemoteXY.rgb_G != prev_G || 
-      RemoteXY.rgb_B != prev_B) {
+      RemoteXY.rgb_B != prev_B) 
+  {
     lastChangeTime = millis();
     pendingSave = true;
     prev_R = RemoteXY.rgb_R;
@@ -115,4 +125,27 @@ void loop() {
     ledcWrite(pwmPins[i], rgbw_values[i]);
   }
   RemoteXYEngine.delay(1);
+}
+
+void logState(uint8_t r, uint8_t g, uint8_t b) {
+  unsigned long now = millis();
+  if (now - lastSerialPrint < 500) return;
+  lastSerialPrint = now;
+
+  // Total output level across all 4 channels, normalized to a single channel max (255).
+  // Above 1.0 means cumulative output exceeds one channel at full brightness.
+  int total = (int)(rgbw_values[0] + rgbw_values[1] + rgbw_values[2] + rgbw_values[3]);
+  int level = total / 4;
+  int overSafe = level - 128;
+
+  Serial.print("RGB in: ");
+  Serial.print(r); Serial.print(",");
+  Serial.print(g); Serial.print(",");
+  Serial.print(b);
+  Serial.print("  RGBW out: ");
+  Serial.print(rgbw_values[0]); Serial.print(",");
+  Serial.print(rgbw_values[1]); Serial.print(",");
+  Serial.print(rgbw_values[2]); Serial.print(",");
+  Serial.print(rgbw_values[3]);
+  Serial.printf("  level: %d  over safe: %d\n", level, overSafe);
 }

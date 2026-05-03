@@ -21,7 +21,7 @@ A Bluetooth-controlled RGB LED lamp using an ESP32 microcontroller and the Remot
 | 18   | 0       | Red   |
 | 39   | 1       | Green |
 | 40   | 2       | Blue  |
-| 21   | 3       | White (unused) |
+| 21   | 3       | White |
 
 ## Software Requirements
 
@@ -43,8 +43,17 @@ A Bluetooth-controlled RGB LED lamp using an ESP32 microcontroller and the Remot
 
 ### Board Settings
 
-- **Board**: ESP32 Dev Module (or your specific board)
+- **Board**: ESP32 Dev Module (or your specific board, e.g. ESP32-S3 Dev Module)
 - **Partition Scheme**: Default (with enough space for BLE)
+- **USB CDC On Boot**: **Enabled** (required on ESP32-S3 boards with native USB to receive `Serial` output on the USB-C port)
+
+### Serial Monitor (optional, for debugging)
+
+The sketch logs RGB input, RGBW output, and a brightness `level` / `over safe` indicator over Serial.
+
+- Open **Tools → Serial Monitor** in Arduino IDE
+- Set baud rate to **9600** (must match `Serial.begin(9600)` in the sketch)
+- The lamp continues to work over BLE while the Serial Monitor is connected
 
 ## Mobile App Setup
 
@@ -59,7 +68,9 @@ A Bluetooth-controlled RGB LED lamp using an ESP32 microcontroller and the Remot
 ## How It Works
 
 ### Color Control
-The app sends RGB values (0-255) over BLE. The ESP32 receives these values and outputs corresponding PWM signals to drive the LEDs. Values are scaled by 50% to limit maximum brightness.
+The app sends RGB values (0-255) over BLE. The ESP32 decomposes the input into an RGBW signal
+(passing R/G/B through directly and using `min(R, G, B)` to drive the white channel for extra
+brightness on desaturated colors), then outputs PWM signals to drive the LEDs.
 
 ### Persistent Storage
 Color settings are automatically saved to flash memory using the ESP32's Preferences library:
@@ -75,18 +86,19 @@ Edit the `REMOTEXY_BLUETOOTH_NAME` define:
 #define REMOTEXY_BLUETOOTH_NAME "MyLamp"
 ```
 
-### Adjust Brightness Scaling
-Modify the division factor in the loop (currently `/2` = 50%):
+### Adjust Safe Brightness Threshold
+`BRIGHTNESS_SAFE` is used by the Serial logging to indicate how far the current output
+exceeds the long-term thermally safe level (50% by default):
 ```cpp
-rgbw_values[0] = RemoteXY.rgb_R / 2;  // Change to /1 for full brightness
+const float BRIGHTNESS_SAFE = 0.5f;
 ```
 
 ### Change Default Color
 Edit the default values in `preferences.getUChar()`:
 ```cpp
-RemoteXY.rgb_R = preferences.getUChar("R", 128);  // Default red value
+RemoteXY.rgb_R = preferences.getUChar("R", 0);    // Default red value
 RemoteXY.rgb_G = preferences.getUChar("G", 128);  // Default green value
-RemoteXY.rgb_B = preferences.getUChar("B", 128);  // Default blue value
+RemoteXY.rgb_B = preferences.getUChar("B", 0);    // Default blue value
 ```
 
 ### Adjust Save Delay
